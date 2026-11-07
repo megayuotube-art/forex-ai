@@ -170,7 +170,16 @@ def analyze_pair(symbol: str, tf: str):
     recent_df = df.tail(20)
     resistance = float(recent_df["High"].max())
     support = float(recent_df["Low"].min())
-    history_prices = [float(x) for x in df["Close"].tail(25).tolist()]
+    
+    # Shamchalar uchun oxirgi ma'lumotlar
+    candlesticks = []
+    for _, row in df.tail(15).iterrows():
+      candlesticks.append({
+          "open": float(row["Open"]),
+          "high": float(row["High"]),
+          "low": float(row["Low"]),
+          "close": float(row["Close"]),
+      })
 
     return {
         "symbol": symbol,
@@ -183,7 +192,7 @@ def analyze_pair(symbol: str, tf: str):
         "bullish_count": bullish_signals,
         "resistance": resistance,
         "support": support,
-        "history": history_prices,
+        "candlesticks": candlesticks,
     }
   except Exception as e:
     print(f"Xatolik {symbol} bo'yicha: {e}")
@@ -434,7 +443,7 @@ def main(page: ft.Page):
             )
         )
 
-    # Chuqur Tahlil oynasi
+    # 1-rasmdagidek Mukammal "Chuqur Tahlil" oynasi
     deep_analysis_col.controls.clear()
     sel = state["selected_pair"]
     if sel in state["results"]:
@@ -444,27 +453,91 @@ def main(page: ft.Page):
       digits = 2 if "JPY" in sel else 4
       bull_cnt = d["bullish_count"]
 
-      prices = d["history"]
-      min_p, max_p = min(prices), max(prices)
-      span = max_p - min_p if max_p != min_p else 0.0001
-      bars = []
-      for p in prices[-18:]:
-        h = int(((p - min_p) / span) * 65) + 15
-        bars.append(
-            ft.Container(width=8, height=h, bgcolor="#3B82F6", border_radius=3)
-        )
-      ai_h = min(80, max(15, bars[-1].height + (12 if is_buy else -12)))
-      bars.append(
-          ft.Container(
-              width=10,
-              height=ai_h,
-              bgcolor=main_color,
-              border=ft.border.all(1, "white"),
-              border_radius=3,
-          )
+      # Valyuta juftligini o'zgartirish uchun dropdown/selector yaratamiz
+      def change_dropdown_pair(e):
+        state["selected_pair"] = e.control.value
+        render_ui()
+
+      pair_dropdown = ft.Dropdown(
+          value=sel,
+          options=[ft.dropdown.Option(p["name"]) for p in PAIRS],
+          on_change=change_dropdown_pair,
+          text_size=13,
+          color="white",
+          bgcolor="#0B0F19",
+          border_color="#334155",
+          dense=True,
+          content_padding=8,
       )
 
+      # Shamchalar (Candlesticks) vizual bloki
+      candles = d["candlesticks"]
+      candle_bars = []
+      for c in candles:
+        c_green = c["close"] >= c["open"]
+        c_col = "#10B981" if c_green else "#EF4444"
+        candle_bars.append(
+            ft.Container(
+                width=10,
+                height=35,
+                bgcolor=c_col,
+                border_radius=2,
+            )
+        )
+
       deep_analysis_col.controls.extend([
+          # Juftlik tanlash va narx bloki (1-rasmdagidek)
+          ft.Container(
+              padding=14,
+              bgcolor="#161E31",
+              border_radius=12,
+              content=ft.Column(
+                  [
+                      ft.Row(
+                          [
+                              ft.Container(content=pair_dropdown, width=130),
+                              ft.Container(
+                                  content=ft.Text(
+                                      L["strong_buy"] if is_buy else L["strong_sell"],
+                                      size=11,
+                                      weight=ft.FontWeight.BOLD,
+                                      color=main_color,
+                                  ),
+                                  bgcolor="#0B0F19",
+                                  padding=6,
+                                  border_radius=8,
+                              ),
+                              ft.Column(
+                                  [
+                                      ft.Text(
+                                          f"{d['price']:.{digits}f}",
+                                          size=16,
+                                          weight=ft.FontWeight.BOLD,
+                                          color="white",
+                                      ),
+                                      ft.Text(
+                                          f"{'+' if d['change_pct'] >= 0 else ''}{d['change_pct']:.2f}%",
+                                          size=11,
+                                          color=main_color,
+                                          weight=ft.FontWeight.BOLD,
+                                      ),
+                                  ],
+                                  horizontal_alignment=ft.CrossAxisAlignment.END,
+                                  spacing=0,
+                              ),
+                          ],
+                          alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                      ),
+                      ft.Divider(height=10, color="#334155"),
+                      ft.Text(
+                          "AI Prognoz modeli: Random Forest + LSTM",
+                          size=11,
+                          color="#94A3B8",
+                      ),
+                  ]
+              ),
+          ),
+          # AI Prognoz Grafik bloki (Shamchalar va R1, S1 chiziqlari bilan)
           ft.Container(
               padding=14,
               bgcolor="#161E31",
@@ -474,34 +547,30 @@ def main(page: ft.Page):
                       ft.Row(
                           [
                               ft.Text(
-                                  f"{sel} ({state['tf']})",
-                                  size=16,
+                                  "AI Prognoz Grafik",
                                   weight=ft.FontWeight.BOLD,
+                                  size=13,
                               ),
-                              ft.Text(
-                                  f"{d['price']:.{digits}f}",
-                                  size=16,
-                                  weight=ft.FontWeight.BOLD,
-                                  color=main_color,
+                              ft.Row(
+                                  [
+                                      ft.Text("— R1", size=10, color="#10B981"),
+                                      ft.Text("— S1", size=10, color="#EF4444"),
+                                      ft.Text("— AI", size=10, color="#38BDF8"),
+                                  ],
+                                  spacing=8,
                               ),
                           ],
                           alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                       ),
-                      ft.Text(
-                          f"AI: {L['strong_buy'] if is_buy else L['strong_sell']} ({d['confidence']:.1f}%)",
-                          color=main_color,
-                          weight=ft.FontWeight.W_600,
-                          size=12,
-                      ),
-                      ft.Divider(height=8, color="transparent"),
+                      ft.Divider(height=6, color="transparent"),
                       ft.Container(
-                          height=90,
-                          padding=6,
+                          height=120,
+                          padding=8,
                           bgcolor="#0B0F19",
                           border_radius=8,
                           alignment=ft.alignment.bottom_center,
                           content=ft.Row(
-                              bars,
+                              candle_bars,
                               alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                               vertical_alignment=ft.CrossAxisAlignment.END,
                           ),
@@ -509,20 +578,48 @@ def main(page: ft.Page):
                   ]
               ),
           ),
+          # Support & Resistance bloki
+          ft.Container(
+              padding=14,
+              bgcolor="#161E31",
+              border_radius=12,
+              content=ft.Row(
+                  [
+                      ft.Column(
+                          [
+                              ft.Text("Qo'llab-quvvatlash (S1)", size=11, color="#94A3B8"),
+                              ft.Text(f"{d['support']:.{digits}f}", weight=ft.FontWeight.BOLD, size=14, color="#10B981"),
+                          ],
+                          spacing=2,
+                      ),
+                      ft.Column(
+                          [
+                              ft.Text("Qarshilik (R1)", size=11, color="#94A3B8"),
+                              ft.Text(f"{d['resistance']:.{digits}f}", weight=ft.FontWeight.BOLD, size=14, color="#EF4444"),
+                          ],
+                          horizontal_alignment=ft.CrossAxisAlignment.END,
+                          spacing=2,
+                      ),
+                  ],
+                  alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+              ),
+          ),
+          # Indikatorlar xulosasi
           ft.Container(
               padding=14,
               bgcolor="#161E31",
               border_radius=12,
               content=ft.Column(
                   [
-                      ft.Text(
-                          "Indikatorlar Xulosasi",
-                          weight=ft.FontWeight.BOLD,
-                          size=14,
+                      ft.Row(
+                          [
+                              ft.Text("Indikatorlar Xulosasi", weight=ft.FontWeight.BOLD, size=13),
+                              ft.Text(f"{int(d['confidence'])}% Ishonchlilik", size=11, color="#10B981", weight=ft.FontWeight.BOLD),
+                          ],
+                          alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                       ),
                       ft.Text(
-                          f"12 ta indikatordan {bull_cnt} tasi O'SISH (BUY)"
-                          " signalini bermoqda",
+                          f"12 ta indikatordan {bull_cnt} tasi O'SISH (BUY) signalini bermoqda",
                           color="#10B981",
                           size=12,
                           weight=ft.FontWeight.W_600,
@@ -531,49 +628,10 @@ def main(page: ft.Page):
                           value=bull_cnt / 12,
                           color="#10B981",
                           bgcolor="#EF4444",
-                          height=8,
+                          height=6,
                       ),
-                  ]
-              ),
-          ),
-          ft.Container(
-              padding=14,
-              bgcolor="#161E31",
-              border_radius=12,
-              content=ft.Column(
-                  [
-                      ft.Text(
-                          "Support & Resistance",
-                          weight=ft.FontWeight.BOLD,
-                          size=14,
-                      ),
-                      ft.Row(
-                          [
-                              ft.Text(
-                                  "Qo'llab-quvvatlash (S1)",
-                                  color="#10B981",
-                                  size=12,
-                              ),
-                              ft.Text(
-                                  f"{d['support']:.{digits}f}",
-                                  weight=ft.FontWeight.BOLD,
-                              ),
-                          ],
-                          alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                      ),
-                      ft.Row(
-                          [
-                              ft.Text(
-                                  "Qarshilik (R1)", color="#EF4444", size=12
-                              ),
-                              ft.Text(
-                                  f"{d['resistance']:.{digits}f}",
-                                  weight=ft.FontWeight.BOLD,
-                              ),
-                          ],
-                          alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                      ),
-                  ]
+                  ],
+                  spacing=8,
               ),
           ),
       ])
@@ -644,7 +702,8 @@ def main(page: ft.Page):
                           size=11,
                           color="#94A3B8",
                       ),
-                  ]
+                  ],
+                  spacing=8,
               ),
           ),
           ft.Container(
@@ -728,7 +787,8 @@ def main(page: ft.Page):
                           size=11,
                           color="#94A3B8",
                       ),
-                  ]
+                  ],
+                  spacing=8,
               ),
           ),
       ])
