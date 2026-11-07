@@ -1,0 +1,6 @@
+flet==0.25.2
+yfinance
+pandas
+numpy
+scikit-learn
+requests
