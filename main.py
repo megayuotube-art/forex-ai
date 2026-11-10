@@ -874,7 +874,3 @@ def main(page: ft.Page):
   )
 
   refresh_market_data()
-
-
-if __name__ == "__main__":
-  ft.app(target=main)
